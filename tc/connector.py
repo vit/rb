@@ -8,6 +8,36 @@ import os
 #import xmltodict
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
+
+
+quotation = {}
+
+
+def predict_buy(data):
+    #return model_buy.predict(data)[0]
+    return False
+def predict_buy_close(data):
+    #return model_buy_close.predict(data)[0]
+    return False
+
+
+def on_candles(candles):
+    print("candles:")
+    print candles
+    print datetime.today()
+    close_p = [c['close'] for c in candles]
+    close_p.append(quotation['last'])
+
+    do_buy = predict_buy(close_p)
+    do_buy_close = predict_buy_close(close_p)
+    if do_buy:
+        pass
+    elif do_buy_close:
+        pass
+
+    print close_p
+    print quotation
 
 callback_func = WINFUNCTYPE(c_bool, c_char_p)
 
@@ -21,6 +51,12 @@ def callback(msg):
     elif root.tag=="error":
         print("error:")
         print(msg)
+    elif root.tag=="quotations":
+        #print("quotations:")
+        #print(msg)
+        qq = parse_quotations(msg)
+        quotation.update(qq[0])
+        print quotation
     elif root.tag=='securities':
         #print("root: %s" % root.tag)
         #'''
@@ -31,41 +67,85 @@ def callback(msg):
                 for child_2 in child:
                     print child_2.tag, child_2.attrib, child_2.text
         #'''
-    #data = xml_to_dict(msg)
-    #if "portfolio_tplus" in msg:
-    #    print("callback:")
-    #    print(msg)
-    #if "candlekinds" in msg:
-    #    print("candlekinds:")
-    #    print(msg)
     if "candles" in msg:
-        print("candles:")
-        print(msg)
-    #    print(data)
-    """
-    Функция, вызываемая коннектором при входящих сообщениях.
-    :param msg:
-        Входящее сообщение Транзака.
-    :return:
-        True если все обработал.
-    """
-    '''
-    obj = parse(msg.decode('utf8'))
-    if isinstance(obj, Error):
-        log.error(u"Траблы: %s" % obj.text)
-        raise TransaqException(obj.text.encode(encoding))
-    elif isinstance(obj, ServerStatus):
-        log.info(u"Соединен с серваком: %s" % obj.connected)
-        if obj.connected == 'error':
-            log.warn(u"Ёпта, ошибка соединения: %s" % obj.text)
-        log.debug(obj)
-    else:
-        log.info(u"Получил объект типа %s" % str(type(obj)))
-        log.debug(obj)
-    if global_handler:
-        global_handler(obj)
-    '''
+        #print("candles:")
+        #print(msg)
+        candles = parse_candles(msg)
+        on_candles(candles)
     return True
+
+def parse_candles(msg):
+    root = ET.fromstring(msg)
+    candles = []
+    for child in root:
+        #child.attrib['close']
+        attr = child.attrib
+        attr['low'] = float(attr['low'])
+        attr['high'] = float(attr['high'])
+        attr['open'] = float(attr['open'])
+        attr['close'] = float(attr['close'])
+        attr['volume'] = int(attr['volume'])
+        attr['date'] = datetime.strptime(attr['date'], '%d.%m.%Y %H:%M:%S')
+        candles.append(attr)
+        #seccode = child.find('seccode').text
+        #if seccode=="SBER":
+    return candles
+
+def parse_quotations(msg):
+    root = ET.fromstring(msg)
+    qlst = []
+    for child in root:
+        q = {}
+        vv = child.findtext('last')
+        if vv:
+           q['last'] = float(vv)
+
+        vv = child.findtext('bid')
+        if vv:
+           q['bid'] = float(vv)
+        vv = child.findtext('offer')
+        if vv:
+           q['offer'] = float(vv)
+
+        vv = child.findtext('numbids')
+        if vv:
+           q['numbids'] = int(vv)
+        vv = child.findtext('numoffers')
+        if vv:
+           q['numoffers'] = int(vv)
+        vv = child.findtext('biddepth')
+        if vv:
+           q['biddepth'] = int(vv)
+        vv = child.findtext('offerdepth')
+        if vv:
+           q['offerdepth'] = int(vv)
+
+        vv = child.findtext('biddepth')
+        if vv:
+           q['biddepth'] = int(vv)
+        vv = child.findtext('time')
+        if vv:
+           q['time'] = (vv)
+
+        vv = child.findtext('tradingstatus')
+        if vv:
+           q['tradingstatus'] = (vv)
+        vv = child.findtext('status')
+        if vv:
+           q['status'] = (vv)
+
+        vv = child.findtext('buydeposit')
+        if vv:
+           q['buydeposit'] = float(vv)
+        vv = child.findtext('selldeposit')
+        if vv:
+           q['selldeposit'] = float(vv)
+
+
+        qlst.append(q)
+        #print q
+    return qlst
+
 
 class Connector:
     def __init__(self, login, password):
@@ -137,6 +217,15 @@ class Connector:
         #return ret
         return True
 
+    def get_servtime_difference(self):
+        rez = self.txml.SendCommand('''<command id="get_servtime_difference"/>''')
+        rez_str = string_at(rez)
+        print("get_servtime_difference: %s" % rez_str)
+        #ret = rez_str and 'true' in rez_str
+        #self.txml.FreeMemory(rez)
+        #return ret
+        return True
+
     def get_securities(self):
         rez = self.txml.SendCommand('''<command id="get_securities"/>''')
         rez_str = string_at(rez)
@@ -173,6 +262,39 @@ class Connector:
         )
         rez_str = string_at(rez)
         print("get_history_data: %s" % rez_str)
+        #self.txml.FreeMemory(rez)
+        return True
+
+    def subscribe(self, board, seccode):
+        rez = self.txml.SendCommand('''
+            <command id="subscribe">
+                <!--alltrades>
+                    <security>
+                        <board>%(board)s</board>
+                        <seccode>%(seccode)s</seccode>
+                    </security>
+                </alltrades-->
+                <quotations>
+                    <security>
+                        <board>%(board)s</board>
+                        <seccode>%(seccode)s</seccode>
+                    </security>
+                </quotations>
+                <!--quotes>
+                    <security>
+                        <board>%(board)s</board>
+                        <seccode>%(seccode)s</seccode>
+                    </security>
+                </quotes-->
+            </command>
+            ''' % ({
+                'board': board,
+                'seccode': seccode
+                })
+            #    <reset>%(reset)s</reset>
+        )
+        rez_str = string_at(rez)
+        print("subscribe: %s" % rez_str)
         #self.txml.FreeMemory(rez)
         return True
 
